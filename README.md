@@ -1,32 +1,32 @@
-# CCBP join-service (course config + admin dashboard)
+# CCBP join-service
 
-A small public config service backing the CCBP one-click "join a live
-session" flow. It doesn't handle student identity, authentication, or
-Google Form submission itself — the authenticated CCBP page does that,
-because it's the only place that legitimately can (see below). This
-service's job is narrower: serve each course's Google Form field info and
-current webinar URL, and provide an admin dashboard to change a course's
-webinar URL without a deploy.
+Backend for the CCBP one-click "join a live session" flow. Handles course
+config, Google Form submission, and the redirect to the webinar; the
+authenticated CCBP page (`forms.ccbp.in/joinsession`) handles identity,
+because it's the only place that legitimately can (see below).
 
 **Read `ccbp-integration/INTEGRATION.md` first if you're wiring this up.**
-That's where the actual student-facing flow is implemented — this service
-is a small supporting piece of it, not the whole system.
+That's where the CCBP-side half of this flow is specified — this repo is
+only the other half.
 
 ## 1. Architecture
 
 ```
-Student clicks a link to the CCBP page (with ?course=<id> on it)
+Student lands on https://forms.ccbp.in/joinsession?course=<id>
   |
   v
-Authenticated CCBP page (forms.ccbp.in or a sibling route — NOT this repo)
+forms.ccbp.in/joinsession (authenticated CCBP page — NOT this repo)
   | 1. reads `course` from its own URL
   | 2. calls the CCBP profile endpoint (already-authenticated, same as
   |    it presumably does today) -> { user_id, name }
-  | 3. GET /api/courses/<course>  (this service)
-  |    -> { formValue, webinarUrl, googleForm: {...} }
+  | 3. redirects the browser (plain navigation, not an SSO operation) to:
+  |    GET /api/join?course=<id>&uid=<user_id>&name=<name>
   v
-  | 4. submits the Google Form directly, client-side
-  | 5. redirects to webinarUrl
+GET /api/join (this service — src/routes/join.js)
+  | 1. looks up the course; unknown -> 404, nothing else happens
+  | 2. validates uid/name are present
+  | 3. submits the Google Form server-side (src/lib/googleFormSubmit.js)
+  | 4. 302s to that course's webinar URL — always, even if step 3 failed
   v
 Student lands in the webinar
 ```
@@ -42,22 +42,29 @@ doesn't help — CORS only governs whether a cross-origin *response* can be
 read, not whether a request can authenticate. The bearer token lives in
 the CCBP app's own JS context on its own origin, and browser storage is
 isolated per-origin, so a page on any other domain has no way to obtain
-it — it would just get a clean `401` regardless of CORS.
+it — it would just get a clean `401` regardless of CORS. (Confirmed again
+with a real captured browser request from `forms.ccbp.in` while logged
+in — it succeeds there specifically because that page already holds the
+token.)
 
-An earlier version of this project tried to work around that with a
-signed "handoff token" redirected through a new backend endpoint on
-CCBP's identity provider (`accounts.ccbp.in`). That turned out to depend
-on a proprietary client-side Auth SDK whose exact redirect/token contract
-wasn't discoverable from outside a minified private bundle — not a safe
-thing to build an auth integration on top of, and it left the whole flow
-blocked on someone confirming that contract.
+Two earlier designs were tried and ruled out:
 
-The design that actually works: run the identity-handling logic **inside**
-an already-authenticated CCBP page (e.g.
-`https://forms.ccbp.in/live-session-doubt-form`, or a sibling route in
-that same app) — it already has the bearer token in scope, so it can call
-the profile endpoint successfully without crossing any origin boundary.
-Full writeup, including what was verified live vs. what's still open: see
+1. A standalone signed "handoff token" redirected through a new backend
+   endpoint on `accounts.ccbp.in`. Depended on a proprietary client-side
+   Auth SDK whose exact redirect/token contract wasn't discoverable from
+   outside a minified private bundle — not safe to build on.
+2. Submitting the Google Form client-side from the CCBP page, with this
+   service only serving non-identity config. Worked, but gave up
+   server-side submission verification and dedup for no real benefit once
+   the current, simpler design became clear.
+
+The design that actually works, confirmed against the real deployed route
+`https://forms.ccbp.in/joinsession`: identity handling runs **inside**
+that already-authenticated page — it already has the bearer token in
+scope, so it calls the profile endpoint successfully, then does a plain
+browser redirect (not an SSO operation — `accounts.ccbp.in`'s own
+redirect-target restrictions don't apply to a page just choosing where to
+navigate next) to `GET /api/join` on this service. Full writeup: see
 `ccbp-integration/INTEGRATION.md`.
 
 ## 2. Project structure
@@ -69,13 +76,15 @@ join-service/
       env.js                  # env var loading + validation
       courses.js               # SEED_COURSES — bootstraps the course store once, on first run
     lib/
-      courseMappingStore.js     # full course CRUD (id/label/formValue/webinarUrl), backs both /api/courses and /admin
+      courseMappingStore.js     # full course CRUD (id/label/formValue/webinarUrl), backs /api/join, /api/courses, and /admin
       googleFormFields.js        # fetches the live Form's course dropdown options, for the admin UI's <select>
-      store.js                    # pluggable KV store (memory | Redis)
-      logger.js                    # structured logging with secret redaction
+      googleFormSubmit.js         # server-side Google Form submission + heuristic verification
+      store.js                     # pluggable KV store (memory | Redis)
+      logger.js                     # structured logging with secret redaction
     routes/
-      courses.js                    # GET /api/courses/:id — public course config lookup
-      admin.js                       # GET/POST /admin — course management dashboard
+      join.js                        # GET /api/join — the actual student-facing integration point
+      courses.js                      # GET /api/courses/:id — smaller public course config lookup
+      admin.js                         # GET/POST /admin — course management dashboard
     server.js                         # Express app wiring (createApp only — no listen(), no dotenv)
     start.js                            # standalone entry point (npm start/dev) — never imported by the Netlify function
   ccbp-integration/
@@ -98,7 +107,7 @@ Copy `.env.example` to `.env` and fill in real values. Key variables:
 
 | Variable | Purpose |
 |---|---|
-| `GOOGLE_FORM_ACTION_URL`, `GOOGLE_FORM_ENTRY_*` | The form endpoint and field ids, served via `GET /api/courses/:id` — already verified against the live form (see `npm run verify-form`). Not submitted by this service; see architecture above. |
+| `GOOGLE_FORM_ACTION_URL`, `GOOGLE_FORM_ENTRY_*` | The form endpoint and field ids — already verified against the live form (see `npm run verify-form`). Submitted server-side by `GET /api/join`; also served as config via `GET /api/courses/:id`. |
 | `REDIS_URL` | Set for any multi-instance deployment, or to persist admin overrides across restarts (see section 6). |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD` | Protects `/admin` (see section 5). `ADMIN_PASSWORD` has no default — the app refuses to start without it set. |
 
@@ -121,8 +130,9 @@ bundled course submits only its primary skill to the form, confirmed as:
 "Progamming Foundations" → `Python`, "Developer Foundations and Node JS" →
 `Node`.
 
-`GET /api/courses/:id` 404s for anything not currently in the course
-store — there is no way to make it return an arbitrary/unknown course.
+`GET /api/join` and `GET /api/courses/:id` both 404 for anything not
+currently in the course store — there is no way to make either return or
+redirect to anything but a known course's own configured values.
 
 ## 5. Admin dashboard (course management)
 
@@ -159,16 +169,26 @@ value (`?course=<id>`) selects it — without a code deploy or restart.
 
 ## 6. Security considerations
 
-- `GET /api/courses/:id` is intentionally public and unauthenticated — it
-  returns only non-sensitive configuration (Google Form field ids/values,
-  webinar URLs), the same data already visible to anyone who views the
-  Google Form's own source or knows a webinar URL. No student identity
-  ever passes through this service, so there's no credential, token, or
-  PII surface here to protect.
-- Course allowlist enforced server-side; `GET /api/courses/:id` 404s for
-  anything not in the course store, and never returns arbitrary data from
-  the request — there is no way to make this service surface anything but
-  a known course's own configured values.
+- **`GET /api/join`'s `uid`/`name` arrive unsigned — stated plainly, not
+  glossed over.** Anyone who knew the URL shape could hit
+  `/api/join?course=X&uid=fake&name=fake` directly and create a fabricated
+  row in the Google Sheet. This is a deliberate trade-off: it's low-stakes
+  (only pollutes bookkeeping data — nothing sensitive is exposed, nothing
+  is granted), and the webinar URL a request lands on always comes from
+  this service's own course config, never from the request, so it can
+  never become an open redirect or an auth bypass regardless of what's
+  sent. A signed-token version of this was built and then deliberately
+  dropped (see `ccbp-integration/INTEGRATION.md`) because it depended on
+  CCBP infrastructure that wasn't reliably available; a lighter-weight
+  shared secret could be added later if this needs tightening without
+  reintroducing that complexity.
+- `GET /api/join` and `GET /api/courses/:id` are intentionally public and
+  unauthenticated for the same reason — nothing sensitive is read or
+  written by an unauthenticated caller beyond the scope described above.
+- Course allowlist enforced server-side; both endpoints 404 for anything
+  not in the course store, and never return or redirect to arbitrary data
+  from the request — there is no way to make this service surface
+  anything but a known course's own configured values.
 - The admin dashboard lets you set a course's webinar URL and id freely,
   but webinar URL is validated to be `https://` (so it can't be pointed at
   a `javascript:` URL or similar) and id to a URL-safe slug pattern — and
@@ -259,7 +279,7 @@ the Netlify function, so that transform issue never applies to it.
 
 ## 9. Test plan
 
-Automated (`npm test`, 24 tests, all passing as of this build):
+Automated (`npm test`, 30 tests, all passing as of this build):
 
 - Seed data: every seed course has a non-empty id/label/formValue and a
   valid `https://` webinar URL; ids are unique.
@@ -272,6 +292,14 @@ Automated (`npm test`, 24 tests, all passing as of this build):
 - `GET /api/courses/:id`: returns the right form config + webinar URL for
   a known course; 404s for an unknown one; reflects an admin-made change
   immediately.
+- `GET /api/join` (against a real running server, Google Form stubbed by
+  a local HTTP server so nothing touches production): a valid
+  course+uid+name submits the form and 302s to the right webinar URL; an
+  unknown course 404s without submitting anything; a missing course, or a
+  missing/empty uid or name, is rejected (400) before any submission; a
+  Google Form failure still 302s to the webinar (never blocks the
+  student); extra request params (`redirect=`, `webinarUrl=`, etc.) never
+  change the redirect target — it always comes from the course store.
 - Admin dashboard route: `/admin` rejects missing/wrong Basic Auth
   credentials and lists courses with correct credentials; create, update
   (including id rename), and delete all work and persist through the
@@ -281,29 +309,34 @@ Automated (`npm test`, 24 tests, all passing as of this build):
   (this specifically exercises `googleFormFields.js`'s cache being cleared
   between tests — see the comment in `admin.route.test.js`).
 
+Also verified directly against the real compiled Netlify function output
+(not just the local dev server) during development — this caught two bugs
+that only manifested in the actual bundled artifact (see the "Deploying to
+Netlify" section above); worth re-running that same check
+(`npx @netlify/zip-it-and-ship-it netlify/functions <out-dir>`, then
+execute the bundled `server.js` directly with a mocked Lambda event) after
+any change that touches `src/server.js`, `src/start.js`, or `netlify/`.
+
 Manual, before go-live (not automatable without a real authenticated CCBP
 session / touching the production Sheet):
 
-1. **Port `redirect-snippet.js`'s logic into the real CCBP page** per
-   `ccbp-integration/INTEGRATION.md`, swapping in that page's real
-   profile-fetch call.
-2. **End-to-end click-through** — as a real logged-in test student, click
-   a join link and confirm a single click lands them in the webinar with
-   no visible UI in between.
+1. **Port `redirect-snippet.js`'s logic into `forms.ccbp.in/joinsession`**
+   (or wherever this flow lives) per `ccbp-integration/INTEGRATION.md`,
+   swapping in that page's real profile-fetch call.
+2. **End-to-end click-through** — as a real logged-in test student, land
+   on that page with `?course=<id>` and confirm it lands them in the
+   webinar with no visible UI in between.
 3. **One live Google Form submission** — confirm a row appears in the
    linked response Sheet with the expected UID/Name/Course; delete that
-   test row afterward. Since submission is now client-side and
-   unconfirmable (see `INTEGRATION.md` "Google Forms submission
-   reliability"), this manual check is the only real verification
-   available.
-4. **Course allowlist** — hit `GET /api/courses/not-a-real-course`;
-   confirm `404 unknown_course`.
+   test row afterward.
+4. **Course allowlist** — hit `GET /api/join?course=not-a-real-course&uid=x&name=x`;
+   confirm `404 unknown_course` and no Sheet row.
 5. **Admin dashboard walkthrough** — log into `/admin` with real
-   credentials: add a new course, confirm `GET /api/courses/:id` serves
-   it immediately; edit an existing course's webinar URL and confirm the
+   credentials: add a new course, confirm `GET /api/join` works for it
+   immediately; edit an existing course's webinar URL and confirm the
    change is reflected; rename a course's id and confirm the old id 404s
    while the new one works; delete a course and confirm it 404s.
 6. **Duplicate click** (optional) — click the same join link twice in a
    row as the same student; decide whether the resulting duplicate Sheet
-   rows are acceptable or whether the CCBP page needs the optional
-   client-side dedup guard noted in `INTEGRATION.md`.
+   rows are acceptable or whether server-side dedup (see
+   `INTEGRATION.md` "Duplicate submissions") is worth adding.

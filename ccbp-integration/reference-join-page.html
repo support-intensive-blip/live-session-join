@@ -1,24 +1,23 @@
 <!--
   Reference implementation only — NOT served by this repo's backend.
 
-  This shows the exact sequence redirect-snippet.js implements, as a
-  complete standalone page, for two purposes:
-    1. A template to port into the real authenticated CCBP page (copy the
-       logic, swap in that page's real profile-fetching code).
+  Shows the exact sequence redirect-snippet.js implements, as a complete
+  standalone page:
+    1. A template to port into forms.ccbp.in/joinsession (or wherever this
+       flow actually lives) — copy the logic, swap in that page's real
+       profile-fetching code.
     2. Something you can open locally to sanity-check the join-service
-       side (GET /api/courses/:id) by editing MOCK_PROFILE below and
-       serving this file from any static server.
-
-  WARNING: this page really does submit to whatever Google Form the
-  join-service is configured with (GOOGLE_FORM_ACTION_URL). If you're just
-  testing locally, point that env var at a local stub server first (see
-  the test suite's startFakeGoogleForm helper for a minimal example) —
-  otherwise trying this page will create a real row in the production
-  response sheet.
+       side (GET /api/join) by editing MOCK_PROFILE below.
 
   It only works for real students if hosted on the actual authenticated
   CCBP origin — opened from anywhere else, the profile fetch below will
   fail the same way described in INTEGRATION.md's CORS/auth analysis.
+
+  WARNING: this page really does submit to whatever Google Form the
+  join-service is configured with (GOOGLE_FORM_ACTION_URL). If you're just
+  testing locally, point that env var at a local stub server first (run
+  scripts/local-form-stub.mjs) — otherwise trying this page creates a real
+  row in the production response sheet.
 -->
 <!doctype html>
 <html lang="en">
@@ -50,30 +49,14 @@
 
         const profile = await getStudentProfile();
 
-        const res = await fetch(
-          `${JOIN_SERVICE_BASE}/api/courses/${encodeURIComponent(course)}`
-        );
-        if (!res.ok) {
-          statusEl.textContent = `Unknown course: ${course}`;
-          return;
-        }
-        const courseConfig = await res.json();
-
-        const body = new URLSearchParams({
-          [courseConfig.googleForm.entryUid]: profile.user_id,
-          [courseConfig.googleForm.entryName]: profile.name,
-          [courseConfig.googleForm.entryCourse]: courseConfig.formValue,
+        const params = new URLSearchParams({
+          course,
+          uid: profile.user_id,
+          name: profile.name,
         });
 
-        fetch(courseConfig.googleForm.actionUrl, {
-          method: "POST",
-          mode: "no-cors",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: body.toString(),
-        }).catch(() => {});
-
-        statusEl.textContent = `Redirecting to ${courseConfig.webinarUrl} …`;
-        window.location.replace(courseConfig.webinarUrl);
+        statusEl.textContent = "Redirecting to join-service…";
+        window.location.href = `${JOIN_SERVICE_BASE}/api/join?${params.toString()}`;
       }
 
       main();

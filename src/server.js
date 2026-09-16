@@ -2,6 +2,7 @@ import express from "express";
 import { loadConfig } from "./config/env.js";
 import { getStore } from "./lib/store.js";
 import { createCoursesRouter } from "./routes/courses.js";
+import { createJoinRouter } from "./routes/join.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { logger } from "./lib/logger.js";
 
@@ -37,6 +38,7 @@ export function createApp() {
   app.get("/health", (req, res) => res.json({ ok: true }));
 
   app.use(createCoursesRouter({ config, store }));
+  app.use(createJoinRouter({ config, store }));
   app.use(createAdminRouter({ config, store }));
 
   app.use((err, req, res, _next) => {
