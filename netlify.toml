@@ -1,0 +1,13 @@
+[build]
+  functions = "netlify/functions"
+  # No real static site — this service is an API + admin dashboard, not a
+  # student-facing page. Deliberately does NOT publish ccbp-integration/
+  # (that folder's reference-join-page.html submits to the real
+  # configured Google Form with no auth of its own; it must stay a local
+  # dev tool, never a public URL).
+  publish = "netlify-public"
+
+[[redirects]]
+  from = "/*"
+  to = "/.netlify/functions/server/:splat"
+  status = 200

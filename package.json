@@ -1,0 +1,22 @@
+{
+  "name": "ccbp-join-redirect-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Public course config service (Google Form fields + admin-editable webinar URLs) for the CCBP one-click join flow.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/**/*.test.js",
+    "verify-form": "node scripts/verify-form-fields.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "ioredis": "^5.4.1",
+    "serverless-http": "^4.0.0"
+  }
+}
