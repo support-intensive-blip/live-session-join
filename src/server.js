@@ -24,12 +24,16 @@ export function createApp() {
   // Admin dashboard forms post as application/x-www-form-urlencoded.
   app.use(express.urlencoded({ extended: false, limit: "10kb" }));
 
-  // GET /api/courses/:id is public, non-sensitive config (see
-  // src/routes/courses.js) — open CORS so the authenticated CCBP page can
-  // read it regardless of its origin. /admin has its own auth and isn't
-  // meant to be called cross-origin at all.
+  // /api/join and /api/courses/:id are both public, non-sensitive (see
+  // src/routes/join.js and src/routes/courses.js) — open CORS so the
+  // authenticated CCBP page can call either regardless of its origin.
+  // /api/join is meant to be reached via a real page redirect
+  // (window.location.href), which is immune to CORS entirely — this
+  // header is just defense-in-depth in case something calls it via
+  // fetch()/XHR instead. /admin has its own auth and isn't meant to be
+  // called cross-origin at all.
   app.use((req, res, next) => {
-    if (req.path.startsWith("/api/courses")) {
+    if (req.path.startsWith("/api/courses") || req.path.startsWith("/api/join")) {
       res.setHeader("Access-Control-Allow-Origin", "*");
     }
     next();
