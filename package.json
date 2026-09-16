@@ -8,10 +8,10 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "node --watch src/server.js",
+    "start": "node -r dotenv/config src/start.js",
+    "dev": "node -r dotenv/config --watch src/start.js",
     "test": "node --test test/**/*.test.js",
-    "verify-form": "node scripts/verify-form-fields.js"
+    "verify-form": "node -r dotenv/config scripts/verify-form-fields.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

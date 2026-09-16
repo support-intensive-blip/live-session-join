@@ -9,7 +9,7 @@
 // Usage: npm run verify-form
 
 import { loadConfig } from "../src/config/env.js";
-import { COURSES } from "../src/config/courses.js";
+import { SEED_COURSES } from "../src/config/courses.js";
 
 const config = loadConfig();
 const viewUrl = config.googleForm.actionUrl.replace(
@@ -54,7 +54,7 @@ checkEntry("Name field", config.googleForm.entryName);
 const courseField = checkEntry("Course field", config.googleForm.entryCourse);
 
 if (courseField) {
-  for (const course of COURSES) {
+  for (const course of SEED_COURSES) {
     if (courseField.options.includes(course.formValue)) {
       console.log(`OK    course "${course.id}" -> "${course.formValue}"`);
     } else {

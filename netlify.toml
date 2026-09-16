@@ -7,6 +7,18 @@
   # dev tool, never a public URL).
   publish = "netlify-public"
 
+[build.environment]
+  # Match package.json's engines.node — the app uses features (built-in
+  # fetch, node:test) that need Node 20+; Netlify's platform default has
+  # been older than that at times.
+  NODE_VERSION = "20"
+
+[functions]
+  # esbuild handles this project's ESM (`"type": "module"`) source and the
+  # lazy `import("ioredis")` in src/lib/store.js correctly; Netlify's
+  # older default bundler does not reliably handle ESM.
+  node_bundler = "esbuild"
+
 [[redirects]]
   from = "/*"
   to = "/.netlify/functions/server/:splat"

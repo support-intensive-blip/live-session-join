@@ -76,7 +76,8 @@ join-service/
     routes/
       courses.js                    # GET /api/courses/:id — public course config lookup
       admin.js                       # GET/POST /admin — course management dashboard
-    server.js                         # Express app wiring
+    server.js                         # Express app wiring (createApp only — no listen(), no dotenv)
+    start.js                            # standalone entry point (npm start/dev) — never imported by the Netlify function
   ccbp-integration/
     INTEGRATION.md                     # the actual student-facing flow contract (lives outside this repo)
     redirect-snippet.js                 # drop-in logic for the authenticated CCBP page
@@ -230,8 +231,14 @@ Railway), a container behind your existing load balancer/CDN, or Netlify
 Netlify runs this as a serverless function, not a long-running process —
 `netlify/functions/server.js` wraps the same Express app
 (`src/server.js`) via `serverless-http`; `netlify.toml` redirects every
-request there. `src/server.js` itself has no Netlify-specific code, so it
-still runs standalone anywhere else via `npm start`.
+request there. `src/server.js` only exports `createApp()` — it never calls
+`listen()` and never touches `import.meta`/`process.argv` — deliberately,
+since Netlify's esbuild-based bundler transforms this ESM project to CJS,
+and `import.meta.url` does not survive that transform (it came through as
+`undefined` and crashed the function on load, verified directly against
+the actual bundled output during development). `src/start.js` is the real
+standalone entry point (`npm start`/`npm run dev`); it's never imported by
+the Netlify function, so that transform issue never applies to it.
 
 - **`REDIS_URL` is required, not optional, on Netlify.** Serverless
   function invocations are ephemeral and don't reliably share memory

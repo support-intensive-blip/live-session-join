@@ -1,11 +1,18 @@
 import express from "express";
-import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config/env.js";
 import { getStore } from "./lib/store.js";
 import { createCoursesRouter } from "./routes/courses.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { logger } from "./lib/logger.js";
 
+// Deliberately just builds the app — doesn't call listen() or do any
+// entry-point self-detection (e.g. `import.meta.url` vs `process.argv`).
+// That kind of check doesn't survive esbuild's ESM->CJS transform cleanly
+// (Netlify's function bundler crashed on load with it — import.meta.url
+// came through as undefined). src/start.js is the actual `node` entry
+// point for standalone use; the Netlify function
+// (netlify/functions/server.js) imports only createApp from here and is
+// never affected by start.js at all, since it never imports it.
 export function createApp() {
   const config = loadConfig();
   const store = getStore(config);
@@ -38,11 +45,4 @@ export function createApp() {
   });
 
   return { app, config };
-}
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const { app, config } = createApp();
-  app.listen(config.port, () => {
-    logger.info("server_started", { port: config.port, env: config.nodeEnv });
-  });
 }

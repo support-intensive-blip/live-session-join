@@ -1,4 +1,10 @@
-import "dotenv/config";
+// Deliberately no `import "dotenv/config"` here: this module is shared by
+// every entry point, including the Netlify function
+// (netlify/functions/server.js), and a static top-level dotenv import
+// causes Netlify's bundler to trace and embed whatever local .env file
+// happens to exist at build time — including real secrets, if run from a
+// machine that has one. Local CLI entry points (src/server.js,
+// scripts/*.js) load dotenv themselves, before calling loadConfig().
 
 function required(name, fallback) {
   const v = process.env[name] ?? fallback;
